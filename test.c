@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
 
 typedef struct DifferentiableOperation DifferentiableOperation;
 typedef enum { UNVISITED, VISITING, VISITED } VisitState;
@@ -187,6 +188,58 @@ void free_operation(DifferentiableOperation* op) {
     free(op);
 }
 
+// Add this function after the existing functions and before main()
+
+void generate_dot_file(DifferentiableOperation* root, const char* filename) {
+    FILE* file = fopen(filename, "w");
+    if (!file) {
+        fprintf(stderr, "Error opening file %s\n", filename);
+        return;
+    }
+
+    fprintf(file, "digraph ComputationGraph {\n");
+
+    // Reset visit states
+    reset_visit_state(root);
+
+    // Use a stack to perform depth-first traversal
+    DifferentiableOperation* stack[MAX_NODES];
+    int stack_size = 0;
+    stack[stack_size++] = root;
+
+    while (stack_size > 0) {
+        DifferentiableOperation* op = stack[--stack_size];
+        
+        if (op->visit_state == VISITED) continue;
+        op->visit_state = VISITED;
+
+        // Generate node
+        fprintf(file, "    node%p [label=\"", (void*)op);
+        if (op->compute == add_compute) {
+            fprintf(file, "+\\nvalue: %.2f\\ngrad: %.2f", op->value, op->grad);
+        } else if (op->compute == mul_compute) {
+            fprintf(file, "*\\nvalue: %.2f\\ngrad: %.2f", op->value, op->grad);
+        } else {
+            fprintf(file, "var\\nvalue: %.2f\\ngrad: %.2f", op->value, op->grad);
+        }
+        fprintf(file, "\"];\n");
+
+        // Generate edges
+        for (int i = 0; i < op->num_inputs; i++) {
+            fprintf(file, "    node%p -> node%p;\n", (void*)op->inputs[i], (void*)op);
+            if (op->inputs[i]->visit_state == UNVISITED) {
+                stack[stack_size++] = op->inputs[i];
+            }
+        }
+    }
+
+    fprintf(file, "}\n");
+    fclose(file);
+
+    // Reset visit states again
+    reset_visit_state(root);
+}
+
 int main() {
     // Create variables
     DifferentiableOperation* a = create_variable(2.0);
@@ -217,6 +270,10 @@ int main() {
 
     // Reset visitation states before freeing
     reset_visit_state(mul_op);
+
+    // After backward pass and before freeing memory
+    generate_dot_file(mul_op, "computation_graph.dot");
+    printf("Computation graph saved to computation_graph.dot\n");
 
     // Free allocated memory
     free_operation(mul_op);
