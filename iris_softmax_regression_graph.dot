@@ -1,0 +1,11 @@
+digraph ComputationGraph {
+    node0x129606940 [label="softmax\nvalue: 0.37\ngrad: 0.00"];
+    node0x129605f10 -> node0x129606940;
+    node0x129605ce0 -> node0x129606940;
+    node0x129605da0 -> node0x129606940;
+    node0x1296060f0 -> node0x129606940;
+    node0x1296060f0 [label="var\nvalue: 1.80\ngrad: 0.00"];
+    node0x129605da0 [label="var\nvalue: 5.10\ngrad: -0.20"];
+    node0x129605ce0 [label="var\nvalue: 3.00\ngrad: 0.00"];
+    node0x129605f10 [label="var\nvalue: 5.90\ngrad: 0.00"];
+}

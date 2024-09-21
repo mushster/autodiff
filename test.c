@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
+#include <time.h>
 
 typedef struct DifferentiableOperation DifferentiableOperation;
 typedef enum { UNVISITED, VISITING, VISITED } VisitState;
@@ -240,43 +241,139 @@ void generate_dot_file(DifferentiableOperation* root, const char* filename) {
     reset_visit_state(root);
 }
 
+// Add these new operations
+void exp_compute(DifferentiableOperation* op) {
+    op->value = exp(op->inputs[0]->value);
+}
+
+void exp_backward(DifferentiableOperation* op, double grad) {
+    op->inputs[0]->grad += grad * op->value;
+}
+
+DifferentiableOperation* create_exp_operation(DifferentiableOperation* input) {
+    DifferentiableOperation* op = malloc(sizeof(DifferentiableOperation));
+    op->inputs = malloc(sizeof(DifferentiableOperation*));
+    op->inputs[0] = input;
+    op->num_inputs = 1;
+    op->compute = exp_compute;
+    op->backward = exp_backward;
+    op->visit_state = UNVISITED;
+    return op;
+}
+
+void softmax_compute(DifferentiableOperation* op) {
+    double sum = 0.0;
+    for (int i = 0; i < op->num_inputs; i++) {
+        sum += op->inputs[i]->value;
+    }
+    op->value = op->inputs[0]->value / sum;
+}
+
+void softmax_backward(DifferentiableOperation* op, double grad) {
+    double softmax = op->value;
+    op->inputs[0]->grad += grad * softmax * (1 - softmax);
+    for (int i = 1; i < op->num_inputs; i++) {
+        op->inputs[i]->grad += grad * (-softmax * op->inputs[i]->value / op->inputs[0]->value);
+    }
+}
+
+DifferentiableOperation* create_softmax_operation(DifferentiableOperation** inputs, int num_inputs) {
+    DifferentiableOperation* op = malloc(sizeof(DifferentiableOperation));
+    op->inputs = malloc(num_inputs * sizeof(DifferentiableOperation*));
+    memcpy(op->inputs, inputs, num_inputs * sizeof(DifferentiableOperation*));
+    op->num_inputs = num_inputs;
+    op->compute = softmax_compute;
+    op->backward = softmax_backward;
+    op->visit_state = UNVISITED;
+    return op;
+}
+
+// In main(), replace the existing code with this softmax regression implementation:
 int main() {
-    // Create variables
-    DifferentiableOperation* a = create_variable(2.0);
-    DifferentiableOperation* b = create_variable(3.0);
-    DifferentiableOperation* c = create_variable(4.0);
+    // Input features
+    DifferentiableOperation* x1 = create_variable(0.5);
+    DifferentiableOperation* x2 = create_variable(-1.0);
+    DifferentiableOperation* x3 = create_variable(0.2);
 
-    // Build computation graph: f = (a + b) * c
-    DifferentiableOperation* add_op = create_add_operation(a, b);
-    DifferentiableOperation* mul_op = create_mul_operation(add_op, c);
+    // Weights (3 features x 4 classes)
+    DifferentiableOperation* w[3][4];
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 4; j++) {
+            w[i][j] = create_variable((double)rand() / RAND_MAX * 0.2 - 0.1);
+        }
+    }
 
-    // Collect nodes with cycle detection
-    if (!collect_nodes(mul_op)) {
+    // Biases (4 classes)
+    DifferentiableOperation* b[4];
+    for (int i = 0; i < 4; i++) {
+        b[i] = create_variable((double)rand() / RAND_MAX * 0.2 - 0.1);
+    }
+
+    // Compute linear combinations
+    DifferentiableOperation* z[4];
+    for (int i = 0; i < 4; i++) {
+        z[i] = create_add_operation(
+            create_add_operation(
+                create_add_operation(
+                    create_mul_operation(x1, w[0][i]),
+                    create_mul_operation(x2, w[1][i])
+                ),
+                create_mul_operation(x3, w[2][i])
+            ),
+            b[i]
+        );
+    }
+
+    // Apply exp to each z
+    DifferentiableOperation* exp_z[4];
+    for (int i = 0; i < 4; i++) {
+        exp_z[i] = create_exp_operation(z[i]);
+    }
+
+    // Compute softmax
+    DifferentiableOperation* softmax[4];
+    for (int i = 0; i < 4; i++) {
+        softmax[i] = create_softmax_operation(exp_z, 4);
+    }
+
+    // Collect nodes and perform forward pass
+    if (!collect_nodes(softmax[3])) {
         fprintf(stderr, "Cycle detected. Exiting.\n");
         return EXIT_FAILURE;
     }
 
-    // Forward pass
-    forward(mul_op);
-    printf("Forward pass result: %f\n", mul_op->value);
+    forward(softmax[3]);
 
-    // Backward pass
+    // Print softmax outputs
+    printf("Softmax outputs:\n");
+    for (int i = 0; i < 4; i++) {
+        printf("Class %d: %f\n", i, softmax[i]->value);
+    }
+
+    // Backward pass (assuming class 2 is the correct label)
+    for (int i = 0; i < 4; i++) {
+        softmax[i]->grad = (i == 2) ? -1.0 / softmax[i]->value : 0;
+    }
     backward_pass();
 
-    // Print gradients
-    printf("Gradient w.r.t a: %f\n", a->grad);
-    printf("Gradient w.r.t b: %f\n", b->grad);
-    printf("Gradient w.r.t c: %f\n", c->grad);
+    // Print gradients of weights and biases
+    printf("\nGradients:\n");
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 4; j++) {
+            printf("dL/dw[%d][%d] = %f\n", i, j, w[i][j]->grad);
+        }
+    }
+    for (int i = 0; i < 4; i++) {
+        printf("dL/db[%d] = %f\n", i, b[i]->grad);
+    }
 
-    // Reset visitation states before freeing
-    reset_visit_state(mul_op);
+    // Generate DOT file
+    generate_dot_file(softmax[3], "softmax_regression_graph.dot");
+    printf("\nSoftmax regression graph saved to softmax_regression_graph.dot\n");
 
-    // After backward pass and before freeing memory
-    generate_dot_file(mul_op, "computation_graph.dot");
-    printf("Computation graph saved to computation_graph.dot\n");
-
-    // Free allocated memory
-    free_operation(mul_op);
+    // Free memory (you'll need to free all created operations)
+    reset_visit_state(softmax[3]);
+    free_operation(softmax[3]);
 
     return 0;
 }
